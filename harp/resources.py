@@ -19,6 +19,11 @@ class Configuration(Resource):
         default_client_timeout = Text()
         default_server_timeout = Text()
 
+    class update(Resource.update):
+        fields = {
+            'commit': Boolean(default=False),
+        }
+
 class Proxy(Resource):
     class schema:
         name = Token(segments=1, readonly=True)

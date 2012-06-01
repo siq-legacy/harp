@@ -21,6 +21,13 @@ class ConfigurationController(ModelController):
         except NoResultFound:
             return None
 
+    def update(self, request, response, subject, data):
+        commit = data.pop('commit', False)
+        super(ConfigurationController, self).update(request, response, subject, data)
+        
+        if commit:
+            subject.write()
+
 class ProxyController(ModelController):
     def acquire(self, subject):
         try:

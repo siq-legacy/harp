@@ -1,3 +1,4 @@
+from spire.core import get_unit
 from spire.schema import *
 
 schema = Schema('harp')
@@ -25,6 +26,23 @@ class Configuration(Model):
 
     backends = relationship('Backend', backref='configuration')
     frontends = relationship('Frontend', backref='configuration')
+
+    def reload(self):
+        openfile = open(self.pidfile, 'r')
+        try:
+            pids = openfile.read().strip()
+            if not pids:
+                return
+        finally:
+            openfile.close()
+
+        component = get_unit('harp.Harp')
+        command = component.configuration['reload-command'] % {
+            'pidfile': self.pidfile,
+            'pids': pids,
+        }
+
+        print command
 
     def render(self):
         globals = ['global']
@@ -55,6 +73,13 @@ class Configuration(Model):
             sections.append(backend.render())
 
         return '\n\n'.join(sections)
+
+    def write(self):
+        openfile = open(self.filepath, 'w+')
+        try:
+            openfile.write(self.render())
+        finally:
+            openfile.close()
 
 class Proxy(Model):
     """A proxy."""
