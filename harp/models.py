@@ -1,3 +1,5 @@
+import subprocess
+
 from spire.core import get_unit
 from spire.schema import *
 
@@ -27,22 +29,21 @@ class Configuration(Model):
     backends = relationship('Backend', backref='configuration')
     frontends = relationship('Frontend', backref='configuration')
 
-    def reload(self):
+    def commit(self):
+        self.write_conffile()
+        self.reload_haproxy()
+
+    def reload_haproxy(self):
         openfile = open(self.pidfile, 'r')
         try:
-            pids = openfile.read().strip()
+            pids = openfile.read().strip().split(' ')
             if not pids:
                 return
         finally:
             openfile.close()
 
-        component = get_unit('harp.Harp')
-        command = component.configuration['reload-command'] % {
-            'pidfile': self.pidfile,
-            'pids': pids,
-        }
-
-        print command
+        binary = get_unit('harp.Harp').configuration['haproxy_path']
+        subprocess.call([binary, '-f', self.filepath, '-sf'] + pids)
 
     def render(self):
         globals = ['global']
@@ -74,7 +75,7 @@ class Configuration(Model):
 
         return '\n\n'.join(sections)
 
-    def write(self):
+    def write_conffile(self):
         openfile = open(self.filepath, 'w+')
         try:
             openfile.write(self.render())
