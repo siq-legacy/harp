@@ -1,6 +1,8 @@
 from mesh.standard import *
 from scheme import *
 
+from harp.constants import RULES
+
 class Configuration(Resource):
     name = 'configuration'
     version = 1
@@ -8,7 +10,7 @@ class Configuration(Resource):
     class schema:
         id = Token(segments=1, nonempty=True, oncreate=True, operators='equal')
         filepath = Text(nonempty=True)
-        pidfile = Text(nullable=False)
+        pidfile = Text()
         chroot = Text()
         daemon = Boolean()
         group = Text()
@@ -18,6 +20,8 @@ class Configuration(Resource):
         default_connect_timeout = Text()
         default_client_timeout = Text()
         default_server_timeout = Text()
+        include_globals = Boolean(default=True)
+        include_defaults = Boolean(default=True)
 
     class update(Resource.update):
         fields = {
@@ -36,6 +40,7 @@ class Proxy(Resource):
         http_close = Boolean()
         http_server_close = Boolean()
         http_log = Boolean()
+        log_global = Boolean()
 
 class Backend(Proxy):
     name = 'backend'
@@ -60,7 +65,17 @@ class ACL(Resource):
     class schema:
         id = Token(segments=3, nonempty=True, oncreate=True, operators='equal')
         name = Token(segments=1, readonly=True)
-        acl = Text(nonempty=True)
+        acls = Sequence(Text(nonempty=True), nonempty=True, unique=True)
+
+class Rule(Resource):
+    name = 'rule'
+    version = 1
+
+    class schema:
+        id = Token(segments=3, nonempty=True, oncreate=True, operators='equal')
+        name = Token(segments=1, readonly=True)
+        rule = Enumeration(RULES, nonempty=True)
+        content = Text(nonempty=True)
 
 class Server(Resource):
     name = 'server'
@@ -91,14 +106,3 @@ class Server(Resource):
         slowstart = Integer()
         track = Text()
         weight = Integer()
-
-class Target(Resource):
-    name = 'target'
-    version = 1
-
-    class schema:
-        id = Token(segments=3, nonempty=True, oncreate=True, operators='equal')
-        rank = Integer(readonly=True)
-        backend = Text(nonempty=True)
-        operator = Enumeration('if unless', default='if')
-        condition = Text(nonempty=True)

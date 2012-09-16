@@ -11,17 +11,13 @@ API = Bundle('harp',
     mount(resources.Backend, 'harp.controllers.BackendController'),
     mount(resources.Configuration, 'harp.controllers.ConfigurationController'),
     mount(resources.Frontend, 'harp.controllers.FrontendController'),
-    mount(resources.Server, 'harp.controllers.ServerController'),
-    mount(resources.Target, 'harp.controllers.TargetController'))
+    mount(resources.Rule, 'harp.controllers.RuleController'),
+    mount(resources.Server, 'harp.controllers.ServerController'))
 
 class APIServer(MeshServer):
     pass
 
 class Harp(Component):
-    configuration = Configuration({
-        'haproxy_path': Text(required=True, nonnull=True),
-    })
-
     api = APIServer.deploy(
         bundles=[API],
         path='/')

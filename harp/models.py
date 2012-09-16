@@ -1,7 +1,8 @@
 import subprocess
 
-from spire.core import get_unit
 from spire.schema import *
+
+from harp.constants import RULES
 
 schema = Schema('harp')
 
@@ -15,7 +16,7 @@ class Configuration(Model):
     id = Identifier()
     name = Token(nullable=False, unique=True)
     filepath = Text(nullable=False, unique=True)
-    pidfile = Text(nullable=False)
+    pidfile = Text()
     chroot = Text()
     daemon = Boolean(default=True)
     group = Text()
@@ -25,6 +26,9 @@ class Configuration(Model):
     default_connect_timeout = Text(default='5000ms')
     default_client_timeout = Text(default='50000ms')
     default_server_timeout = Text(default='50000ms')
+    include_globals = Boolean(default=True)
+    include_defaults = Boolean(default=True)
+    reload_command = Text()
 
     backends = relationship('Backend', backref='configuration')
     frontends = relationship('Frontend', backref='configuration')
@@ -34,18 +38,40 @@ class Configuration(Model):
         self.reload_haproxy()
 
     def reload_haproxy(self):
-        openfile = open(self.pidfile, 'r')
+        command = self.reload_command
+        if command:
+            subprocess.call(command.split(' '))
+
+    def render(self):
+        sections = []
+        if self.include_globals:
+            sections.append(self._render_globals())
+        if self.include_defaults:
+            sections.append(self._render_defaults())
+
+        for frontend in self.frontends:
+            sections.append(frontend.render())
+        for backend in self.backends:
+            sections.append(backend.render())
+
+        return '\n\n'.join(sections) + '\n'
+
+    def write_conffile(self):
+        openfile = open(self.filepath, 'w+')
         try:
-            pids = openfile.read().strip().split(' ')
-            if not pids:
-                return
+            openfile.write(self.render())
         finally:
             openfile.close()
 
-        binary = get_unit('harp.Harp').configuration['haproxy_path']
-        subprocess.call([binary, '-f', self.filepath, '-sf'] + pids)
+    def _render_defaults(self):
+        return '\n'.join(['defaults',
+            '    mode %s' % self.default_mode,
+            '    timeout connect %s' % self.default_connect_timeout,
+            '    timeout client %s' % self.default_client_timeout,
+            '    timeout server %s' % self.default_server_timeout,
+        ])
 
-    def render(self):
+    def _render_globals(self):
         globals = ['global']
         if self.chroot:
             globals.append('    chroot %s' % self.chroot)
@@ -59,28 +85,7 @@ class Configuration(Model):
             globals.append('    pidfile %s' % self.pidfile)
         if self.user:
             globals.append('    user %s' % self.user)
-
-        defaults = ['defaults',
-            '    mode %s' % self.default_mode,
-            '    timeout connect %s' % self.default_connect_timeout,
-            '    timeout client %s' % self.default_client_timeout,
-            '    timeout server %s' % self.default_server_timeout,
-        ]
-
-        sections = ['\n'.join(globals), '\n'.join(defaults)]
-        for frontend in self.frontends:
-            sections.append(frontend.render())
-        for backend in self.backends:
-            sections.append(backend.render())
-
-        return '\n\n'.join(sections)
-
-    def write_conffile(self):
-        openfile = open(self.filepath, 'w+')
-        try:
-            openfile.write(self.render())
-        finally:
-            openfile.close()
+        return '\n'.join(globals)
 
 class Proxy(Model):
     """A proxy."""
@@ -104,8 +109,9 @@ class Proxy(Model):
     http_close = Boolean(default=False)
     http_server_close = Boolean(default=False)
     http_log = Boolean(default=False)
+    log_global = Boolean(default=False)
 
-    acls = relationship('ACL', backref='proxy')
+    acls = relationship('ACL', backref='proxy', order_by='name')
 
     TIMEOUTS = ('connect_timeout', 'client_timeout', 'server_timeout')
 
@@ -131,9 +137,14 @@ class Proxy(Model):
             options.append('    option httpclose')
         if self.http_server_close:
             options.append('    option http-server-close')
+        if self.log_global:
+            options.append('    log global')
 
-        for acl in self.acls:
-            options.append(acl.render())
+        acls = self.acls
+        if acls:
+            options.append('')
+            for acl in acls:
+                options.append(acl.render())
 
         return options
 
@@ -170,16 +181,24 @@ class Frontend(Proxy):
     bind = Text(nullable=False)
     default_backend = Text()
 
-    targets = relationship('Target', backref='proxy', order_by='Target.rank')
+    rules = relationship('Rule', backref='proxy')
 
     def render(self):
         options = ['frontend %s' % self.name, '    bind %s' % self.bind]
         options.extend(self._render_common_options())
 
-        for target in self.targets:
-            options.append(target.render())
+        rules = self.rules
+        for name in RULES:
+            additions = []
+            for rule in rules:
+                if rule.rule == name:
+                    additions.append(rule.render())
+            if additions:
+                options.append('')
+                options.extend(additions)
 
         if self.default_backend:
+            options.append('')
             options.append('    default_backend %s' % self.default_backend)
 
         return '\n'.join(options)
@@ -190,7 +209,7 @@ class ACL(Model):
     class meta:
         schema = schema
         tablename = 'acl'
-        constraints = [UniqueConstraint('proxy_id', 'name')]
+        constraints = [UniqueConstraint('proxy_id', 'name', 'acl')]
 
     id = Identifier()
     proxy_id = ForeignKey('proxy.id', nullable=False)
@@ -199,6 +218,22 @@ class ACL(Model):
 
     def render(self):
         return '    acl %s %s' % (self.name, self.acl)
+
+class Rule(Model):
+    """A proxy rule."""
+
+    class meta:
+        schema = schema
+        tablename = 'rule'
+
+    id = Identifier()
+    proxy_id = ForeignKey('proxy.id', nullable=False)
+    name = Token(nullable=False)
+    rule = Enumeration(RULES, nullable=False)
+    content = Text(nullable=False)
+
+    def render(self):
+        return '    %s %s' % (self.rule, self.content)
 
 class Server(Model):
     """A backend server."""
@@ -249,21 +284,3 @@ class Server(Model):
                 options.append('%s %s' % (option.replace('_', '-'), value))
 
         return '    server %s %s %s' % (self.name, self.address, ' '.join(options))
-
-class Target(Model):
-    """A frontend target."""
-
-    class meta:
-        schema = schema
-        tablename = 'target'
-        constraints = [UniqueConstraint('proxy_id', 'rank')]
-
-    id = Identifier()
-    proxy_id = ForeignKey('proxy.id', nullable=False)
-    rank = Integer(nullable=False, minimum=1)
-    backend = Text(nullable=False)
-    operator = Enumeration('if unless', default='if')
-    condition = Text(nullable=False)
-
-    def render(self):
-        return '    use_backend %s %s %s' % (self.backend, self.operator, self.condition)
