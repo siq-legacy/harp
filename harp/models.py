@@ -111,7 +111,7 @@ class Proxy(Model):
     http_log = Boolean(default=False)
     log_global = Boolean(default=False)
 
-    acls = relationship('ACL', backref='proxy', order_by='name')
+    acls = relationship('ACL', backref='proxy', order_by='ACL.name')
 
     TIMEOUTS = ('connect_timeout', 'client_timeout', 'server_timeout')
 
